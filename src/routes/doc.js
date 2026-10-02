@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApiBase, getWsUrl, authHeaders, clearSession, isAuthError, isTokenExpired, markSessionExpired } from '../config';
 
@@ -17,6 +17,7 @@ const Doc = () => {
   const editorRef = useRef(null);
   const lastContentRef = useRef('');
   const authRedirectStartedRef = useRef(false);
+  const pendingCaretRef = useRef(null);
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -148,7 +149,26 @@ const Doc = () => {
     }
   };
 
+  const rememberCaretForRemoteEdit = (adjust) => {
+    const el = editorRef.current;
+    if (!el) return;
+    pendingCaretRef.current = {
+      start: adjust(el.selectionStart),
+      end: adjust(el.selectionEnd),
+    };
+  };
+
+  useLayoutEffect(() => {
+    const caret = pendingCaretRef.current;
+    const el = editorRef.current;
+    if (!caret || !el) return;
+    el.selectionStart = caret.start;
+    el.selectionEnd = caret.end;
+    pendingCaretRef.current = null;
+  }, [content]);
+
   const applyInsert = (pos, text) => {
+    rememberCaretForRemoteEdit((index) => (index > pos ? index + text.length : index));
     setContent(prev => {
       const newContent = prev.slice(0, pos) + text + prev.slice(pos);
       lastContentRef.current = newContent;
@@ -157,6 +177,11 @@ const Doc = () => {
   };
 
   const applyDelete = (pos, len) => {
+    rememberCaretForRemoteEdit((index) => {
+      if (index <= pos) return index;
+      if (index >= pos + len) return index - len;
+      return pos;
+    });
     setContent(prev => {
       const newContent = prev.slice(0, pos) + prev.slice(pos + len);
       lastContentRef.current = newContent;
